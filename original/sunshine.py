@@ -25,15 +25,8 @@ import argparse
 import os
 import html
 import copy
-import re
-if __name__ != "__web__":
-    import requests
-import csv
-from decimal import Decimal
-if __name__ == "__web__":
-    from js import writeToLog, fetchDataSync
 
-
+VERSION = "0.9"
 NAME = "Sunshine"
 
 PREFERRED_VULNERABILITY_RATING_METHODS_ORDER = ["CVSSv4",
@@ -50,9 +43,7 @@ VALID_SEVERITIES = {"critical": 4,
                     "low": 1,
                     "info": 0,
                     "information": 0,
-                    "unknown": -1,
-                    "clean": -2}
-
+                    "clean": -1}
 
 GREY = '#bcbcbc'
 GREEN = '#7dd491'
@@ -76,11 +67,7 @@ STYLES = {"critical": CRITICAL_STYLE,
           "medium": MEDIUM_STYLE,
           "low": LOW_STYLE,
           "information": INFORMATION_STYLE,
-          "clean": BASIC_STYLE,
-          "unknown": INFORMATION_STYLE}
-
-
-REMAINING_WEB_LOGS = 200
+          "clean": BASIC_STYLE}
 
 
 HTML_TEMPLATE = """
@@ -147,8 +134,6 @@ HTML_TEMPLATE = """
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
-            overflow-x:auto;
-            max-width:100%;
         }
         #table-container-placeholder, #info-table-container-placeholder, #vulnerabilities-table-container-placeholder {
             background-color: #fffffF;
@@ -249,50 +234,12 @@ HTML_TEMPLATE = """
                 background-image: none !important;
             }
         }
-
-        .loading-overlay {
-          position: fixed;
-          width: 100%;
-          height: 100vh;
-          background: #032c57;
-          top: 0;
-          left: 0;
-          z-index: 1000;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          color: #baccde;
-          text-transform: uppercase;
-          letter-spacing: 0.3rem;
-          font-weight: bold;
-        }
-
-        .spinner {
-          border: 4px solid #baccde;
-          border-top: 4px solid #3498db;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 2s linear infinite;
-          margin-bottom: 10px;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
     
     </style>
 </head>
 
 
 <body>
-    <div id="loadingOverlay" class="loading-overlay">
-      <div class="spinner"></div>
-      <div class="loading-text">Loading Sunshine SBOM...</div>
-    </div>
-
     <h1 class="light-text">Sunshine - SBOM visualization tool</h1>
     <br>
     <div id="upload-file-container">
@@ -331,13 +278,13 @@ HTML_TEMPLATE = """
         <li><b>Clicking:</b> refocuses the chart. The clicked segment becomes the center (second innermost circle), showing only that component and its dependencies. In this view, the innermost circle is always blue. Clicking the blue circle navigates back up one level in the dependency hierarchy.</li>
     </ul>
     <hr>
-    <div class="form-check" id="sunburst-selector-all">
+    <div class="form-check">
       <input class="form-check-input" type="radio" name="showComponentsSwitch" id="allComponents" value="allComponents" checked onchange="handleShowComponentsSwitchChange(this)">
       <label class="form-check-label" for="allComponents">
         Show all components
       </label>
     </div>
-    <div class="form-check" id="sunburst-selector-vulnerable">
+    <div class="form-check">
       <input class="form-check-input" type="radio" name="showComponentsSwitch" id="vulnerableComponents" value="vulnerableComponents" onchange="handleShowComponentsSwitchChange(this)">
       <label class="form-check-label" for="vulnerableComponents">
         Show only components with direct or transitive vulnerabilities
@@ -401,15 +348,6 @@ HTML_TEMPLATE = """
                 <table id="vulnerabilities-table" class="table table-striped table-bordered" style="width:100%"><VULNERABILITIES_TABLE_HERE></table>
     </div>
     <script type="text/javascript">
-        window.addEventListener('load', function() {
-          const loadingOverlay = document.getElementById('loadingOverlay');
-          loadingOverlay.style.opacity = '0';
-          loadingOverlay.style.transition = 'opacity 0.5s ease';
-          setTimeout(() => {
-            loadingOverlay.style.display = 'none';
-          }, 500);
-        });
-
         function showDiv(divId) {
             var div = document.getElementById(divId);
             if (div.style.display === "none") {
@@ -639,77 +577,9 @@ HTML_TEMPLATE = """
             let columnIndex = $(this).parent().index();
             vulnerabilitiesTable.column(columnIndex).search(this.value).draw();
         });
-
-        function countSegments(node) {
-          let count = 1;
-          if (node.children) {
-            node.children.forEach(child => {
-              count += countSegments(child);
-            });
-          }
-          return count;
-        }
-
-
-        function turnChartIntoImageIfTooManySegments(chartContainerId) {
-            var chartContainerInnerDiv = document.getElementById(chartContainerId);
-            var echartsInstance = echarts.getInstanceByDom(chartContainerInnerDiv);
-            var echartsInstanceData = echartsInstance.getOption().series[0].data;
-            let totalSegments = echartsInstanceData.reduce((sum, node) => sum + countSegments(node), 0);
-
-            if (totalSegments > 10000) {
-                var chartContainerInnerDivOnlyVuln = document.getElementById("chart-container-only-vulnerable-inner");
-                echarts.getInstanceByDom(chartContainerInnerDivOnlyVuln).dispose();
-                chartContainerInnerDivOnlyVuln.remove();
-
-                document.getElementById("sunburst-selector-all").innerHTML = '<div class="alert alert-warning" role="alert">WARNING: the chart is not displayed in interactive mode because there are too many dependency relationships. You can still explore components and relationships in the components table.</div>';
-                document.getElementById("sunburst-selector-vulnerable").remove();
-
-                chartContainerInnerDiv.style.display = "block";
-                echartsInstance.resize();
-
-                var imgData = echartsInstance.getDataURL({
-                  type: 'png',
-                  pixelRatio: 2, // Adjust as needed for resolution
-                  backgroundColor: '#fff' // Optional: set background color
-                });
-
-                echartsInstance.dispose();
-                
-                var img = document.createElement('img');
-                img.src = imgData;
-                img.style.width = '100%';
-                img.style.height = 'auto';
-
-                chartContainerInnerDiv.innerHTML = '';
-                chartContainerInnerDiv.appendChild(img);
-                chartContainerInnerDiv.style.height = 'auto';
-            }
-        }
-
-        function showWarningIfChartWasNotCreated(chartContainerId) {
-            var chartContainerInnerDiv = document.getElementById(chartContainerId);
-
-            var chartContainerInnerDivOnlyVuln = document.getElementById("chart-container-only-vulnerable-inner");
-            echarts.getInstanceByDom(chartContainerInnerDivOnlyVuln).dispose();
-            chartContainerInnerDivOnlyVuln.remove();
-
-            document.getElementById("sunburst-selector-all").innerHTML = '<div class="alert alert-danger" role="alert">WARNING: the chart is not displayed because there are too many dependency relationships. You can still explore components and relationships in the components table.</div>';
-            document.getElementById("sunburst-selector-vulnerable").remove();
-
-            chartContainerInnerDiv.style.display = "block";
-
-            chartContainerInnerDiv.innerHTML = '';
-            chartContainerInnerDiv.style.height = 'auto';
-        }
-
-        turnChartIntoImageIfTooManySegments("chart-container-inner");
-        <SHOW_WARNING_IF_CHART_WAS_NOT_CREATED>
-
-
       </script>
       <br><br>
-      <div id="footer">Sunshine - SBOM visualization tool | Made by <a href="https://www.linkedin.com/in/lucacapacci/">Luca Capacci</a> | Contributor <a href="https://www.linkedin.com/in/mattiafierro/">Mattia Fierro</a> | <a href="https://github.com/CycloneDX/Sunshine/">GitHub repository</a> | <a href="https://github.com/CycloneDX/Sunshine/blob/main/LICENSE">License</a></div>
+      <div id="footer">Sunshine - SBOM visualization tool by <a href="https://www.linkedin.com/in/lucacapacci/">Luca Capacci</a> | <a href="https://github.com/CycloneDX/Sunshine/">GitHub repository</a> | <a href="https://github.com/CycloneDX/Sunshine/blob/main/LICENSE">License</a></div>
     </body>
 </html>
 """
@@ -717,12 +587,8 @@ HTML_TEMPLATE = """
 
 def custom_print(text):
     if __name__ == "__web__":
-        global REMAINING_WEB_LOGS
-        if REMAINING_WEB_LOGS > 0:
-            REMAINING_WEB_LOGS -= 1
-            writeToLog(text)
-            if REMAINING_WEB_LOGS == 0:
-                writeToLog("WARNING: Messages were truncated because there are too many to be displayed here, use the CLI version to view all the messages")
+        from js import writeToLog
+        writeToLog(text)
     else:
         print(text)
 
@@ -777,76 +643,36 @@ def get_severity_by_score(score):
         return "information"
 
 
-def get_preferred_vuln_source(source_1, source_2):
-    source_1 = source_1.upper()
-    source_2 = source_2.upper()
-
-    if source_1 == "NVD":
-        source_1_order = 0
-    elif source_1 in ["-", "EPSS"]:
-        source_1_order = 2
-    else:
-        source_1_order = 1
-
-    if source_2 == "NVD":
-        source_2_order = 0
-    elif source_2 in ["-", "EPSS"]:
-        source_2_order = 2
-    else:
-        source_2_order = 1
-
-    if source_1_order < source_2_order:
-        return source_1
-    else:
-        return source_2
-
-
 def parse_vulnerability_data(vulnerability):
     vuln_id = vulnerability["id"]
 
     vuln_severity = None
     vuln_score = 0.0
     vuln_vector = "-"
-    vuln_source = "-"
-    found_at_least_one = False
     if "ratings" in vulnerability:
-        for preferred_rating_method in PREFERRED_VULNERABILITY_RATING_METHODS_ORDER:
-            if found_at_least_one is True:
-                break
-            for rating in vulnerability["ratings"]:
-                if "method" not in rating:
-                    continue
+        for rating in vulnerability["ratings"]:
+            if "method" not in rating:
+                continue
+            for preferred_rating_method in PREFERRED_VULNERABILITY_RATING_METHODS_ORDER:
                 if rating["method"] == preferred_rating_method:
-                    found_at_least_one = True
-                    current_vuln_score = 0.0
-                    current_vuln_vector = "-"
-                    current_vuln_source = "-"
-                    if "severity" in rating and rating["severity"].lower() in VALID_SEVERITIES:
-                        current_vuln_severity = rating["severity"]
-                        if current_vuln_severity.lower() == "info":
-                            current_vuln_severity = "information"
-                        current_vuln_severity = current_vuln_severity.lower()
-                        if "score" in rating:
-                            current_vuln_score = float(rating["score"])
+                    if "severity" in rating:
+                        rating_vuln_severity = rating["severity"]
+                        if rating_vuln_severity.lower() in VALID_SEVERITIES:
+                            if rating_vuln_severity.lower() == "info":
+                                rating_vuln_severity = "information"
+                            vuln_severity = rating_vuln_severity.lower()
+                            if "score" in rating:
+                                vuln_score = float(rating["score"])
+                            if "vector" in rating:
+                                vuln_vector = rating["vector"]
+                            break
+                    if "score" in rating:
+                        vuln_severity = get_severity_by_score(rating["score"])
+                        vuln_score = float(rating["score"])
                         if "vector" in rating:
-                            current_vuln_vector = rating["vector"]
-                        if "source" in rating:
-                            if "name" in rating["source"]:
-                                current_vuln_source =  rating["source"]["name"]
-                    elif "score" in rating:
-                        current_vuln_severity = get_severity_by_score(rating["score"])
-                        current_vuln_score = float(rating["score"])
-                        if "vector" in rating:
-                            current_vuln_vector = rating["vector"]
-                        if "source" in rating:
-                            if "name" in rating["source"]:
-                                current_vuln_source =  rating["source"]["name"]
+                            vuln_vector = rating["vector"]
+                        break
 
-                    if get_preferred_vuln_source(vuln_source, current_vuln_source) == current_vuln_source.upper():
-                        vuln_severity = current_vuln_severity
-                        vuln_score = current_vuln_score
-                        vuln_vector = current_vuln_vector
-                        vuln_source = current_vuln_source
 
     if vuln_severity is None:
         if "ratings" not in vulnerability:
@@ -887,8 +713,6 @@ def get_bom_ref(component_json, all_bom_refs):
         bom_ref = component_json["bom-ref"]
         return bom_ref
     else:
-        if 'version' not in component_json:
-            component_json['version'] = ""
         bom_ref_cache_key = f"{component_json['name']} - {component_json['version']}"
         if bom_ref_cache_key in bom_ref_cache:
             return bom_ref_cache[f"{component_json['name']} - {component_json['version']}"]
@@ -926,10 +750,10 @@ def get_bom_ref(component_json, all_bom_refs):
             guessed_name_03 = f'{component_json["name"]}:{component_json["version"]}'
 
             for test in [guessed_name_01, guessed_name_02, guessed_name_03]:
-                if f"/{test}:" in potential_bom_ref:
+                if f"/{test}:" in bom_ref:
                     number_of_results += 1
                     result = potential_bom_ref
-                elif f":{test}:" in potential_bom_ref:
+                elif f":{test}:" in bom_ref:
                     number_of_results += 1
                     result = potential_bom_ref
         if number_of_results == 1:  # I want just one result, otherwise it means the sbom is ambiguous and I can't make any educated guess
@@ -1150,97 +974,15 @@ def parse_metadata(data):
                 if "version" in tool:
                     metadata_info[info_id]["Version"] = tool["version"]
 
-            if "services" in metadata_field["tools"]:
-                counter_services = 0
-                services = metadata_field["tools"]["services"]
-                
-                for service in services:
-                    counter_services += 1
-                    field_id = "Service"
-                    if len(services) > 1:
-                        field_id = f"Service #{counter_services}"
-
-                    if "type" in service:
-                        metadata_info[info_id][f"{field_id} Type"] = service["type"]
-                    if "group" in service:
-                        metadata_info[info_id][f"{field_id} Group"] = service["group"]
-                    if "vendor" in service:
-                        metadata_info[info_id][f"{field_id} Vendor"] = service["vendor"]
-                    if "name" in service:
-                        metadata_info[info_id][f"{field_id} Name"] = service["name"]
-                    if "version" in service:
-                        metadata_info[info_id][f"{field_id} Version"] = service["version"]
-
-            if "components" in metadata_field["tools"]:
-                counter_tool_components = 0
-                tool_components = metadata_field["tools"]["components"]
-                
-                for tool_component in tool_components:
-                    counter_tool_components += 1
-                    field_id = "Component"
-                    if len(tool_components) > 1:
-                        field_id = f"Component #{counter_tool_components}"
-
-                    if "type" in tool_component:
-                        metadata_info[info_id][f"{field_id} Type"] = tool_component["type"]
-                    if "group" in tool_component:
-                        metadata_info[info_id][f"{field_id} Group"] = tool_component["group"]
-                    if "vendor" in tool_component:
-                        metadata_info[info_id][f"{field_id} Vendor"] = tool_component["vendor"]
-                    if "name" in tool_component:
-                        metadata_info[info_id][f"{field_id} Name"] = tool_component["name"]
-                    if "version" in tool_component:
-                        metadata_info[info_id][f"{field_id} Version"] = tool_component["version"]
-
     return metadata_info
 
 
-def should_add_vulnerability(vulnerability_data, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss, enrich_cves):
-    if only_in_cisa_kev is False and only_critical_severity is False and only_high_severity_or_above is False and only_medium_severity_or_above is False and only_low_severity_or_above is False and min_cvss == 0.0 and min_epss == 0.00:
-        return True
-
-    if enrich_cves is True:
-        if only_in_cisa_kev is True and vulnerability_data["cisa_kev"] == "-":
-            return False
-        if vulnerability_data["epss"] == "-":
-            if min_epss > 0.00:
-                return False
-        else:
-            if float(vulnerability_data["epss"]) < min_epss:
-                return False
-
-    if only_critical_severity is True and vulnerability_data["severity"] != "critical":
-        return False
-
-    if only_high_severity_or_above is True and vulnerability_data["severity"] not in ["critical", "high"]:
-        return False
-
-    if only_medium_severity_or_above is True and vulnerability_data["severity"] not in ["critical", "high", "medium"]:
-        return False
-
-    if only_low_severity_or_above is True and vulnerability_data["severity"] not in ["critical", "high", "medium", "low"]:
-        return False
-
-    if vulnerability_data["score"] == "-":
-        if min_cvss > 0.0:
-            return False
-    else:
-        if float(vulnerability_data["score"]) < min_cvss:
-            return False
-
-    return True
-
-
-def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss):
+def parse_json_data(data):
     all_bom_refs, meta_bom_ref_is_used = get_all_bom_refs(data)
 
     guessed_bom_refs_cache = {}
 
     components = {}
-
-    if enrich_cves is True:
-        epss_cache = {}
-        cisa_kev_cache = {}
 
     root_keywords = []
     if "components" in data:
@@ -1280,7 +1022,7 @@ def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity,
                             guessed_bom_ref = normalize_bom_ref(all_bom_refs, depends_on)
                             guessed_bom_refs_cache[depends_on] = guessed_bom_ref
 
-                            if guessed_bom_ref is None or guessed_bom_ref not in components:
+                            if guessed_bom_ref is None:
                                 custom_print(f"Match not found. I'll create a fake one.")
                                 components[depends_on] = create_fake_component(depends_on)
                             else:
@@ -1299,18 +1041,10 @@ def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity,
                     vuln_id, vuln_severity, vuln_score, vuln_vector = parse_vulnerability_data(vulnerability)
 
                     vulnerability_data = {"id": vuln_id, "severity": vuln_severity, "score": vuln_score, "vector": vuln_vector}
-
-                    if enrich_cves is True:
-                        current_epss = get_epss(vuln_id, epss_cache)
-                        current_cisa_kev = get_cisa_kev(vuln_id, cisa_kev_cache)
-                        vulnerability_data["epss"] = current_epss
-                        vulnerability_data["cisa_kev"] = cisa_kev
-
-                    if should_add_vulnerability(vulnerability_data, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss, enrich_cves):
-                        if vulnerability_data not in components[bom_ref]["vulnerabilities"]:
-                            components[bom_ref]["vulnerabilities"].append(vulnerability_data)
-                        if VALID_SEVERITIES[vuln_severity] > VALID_SEVERITIES[components[bom_ref]["max_vulnerability_severity"]]:
-                            components[bom_ref]["max_vulnerability_severity"] = vuln_severity
+                    if vulnerability_data not in components[bom_ref]["vulnerabilities"]:
+                        components[bom_ref]["vulnerabilities"].append(vulnerability_data)
+                    if VALID_SEVERITIES[vuln_severity] > VALID_SEVERITIES[components[bom_ref]["max_vulnerability_severity"]]:
+                        components[bom_ref]["max_vulnerability_severity"] = vuln_severity
 
     if "dependencies" in data:
         for dependency in data["dependencies"]:
@@ -1322,7 +1056,7 @@ def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity,
                     custom_print(f"WARNING: 'ref' '{bom_ref}' is used in 'dependencies' in a 'ref' field but it's not declared in 'components'. I'll search for a match...")
                     guessed_bom_ref = normalize_bom_ref(all_bom_refs, bom_ref)
                     guessed_bom_refs_cache[bom_ref] = guessed_bom_ref
-                    if guessed_bom_ref is None or guessed_bom_ref not in components:
+                    if guessed_bom_ref is None:
                         custom_print(f"Match not found. I'll create a fake one.")
                         components[bom_ref] = create_fake_component(bom_ref)
                     else:
@@ -1338,7 +1072,7 @@ def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity,
                             custom_print(f"WARNING: 'dependsOn' '{depends_on}' is used in 'dependencies' in a 'dependsOn' field but it's not declared in 'components'. I'll search for a match...")
                             guessed_bom_ref = normalize_bom_ref(all_bom_refs, depends_on)
                             guessed_bom_refs_cache[depends_on] = guessed_bom_ref
-                            if guessed_bom_ref is None or guessed_bom_ref not in components:
+                            if guessed_bom_ref is None:
                                 custom_print(f"Match not found. I'll create a fake one.")
                                 components[depends_on] = create_fake_component(depends_on)
                             else:
@@ -1359,38 +1093,25 @@ def parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity,
                     components[bom_ref] = create_fake_component(bom_ref)
 
                 vulnerability_data = {"id": vuln_id, "severity": vuln_severity, "score": vuln_score, "vector": vuln_vector}
-
-                if enrich_cves is True:
-                        current_epss = get_epss(vuln_id, epss_cache)
-                        current_cisa_kev = get_cisa_kev(vuln_id, cisa_kev_cache)
-                        vulnerability_data["epss"] = current_epss
-                        vulnerability_data["cisa_kev"] = current_cisa_kev
-
-                if should_add_vulnerability(vulnerability_data, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss, enrich_cves):
-
-                    if vulnerability_data not in components[bom_ref]["vulnerabilities"]:
-                        components[bom_ref]["vulnerabilities"].append(vulnerability_data)
-                    if VALID_SEVERITIES[vuln_severity] > VALID_SEVERITIES[components[bom_ref]["max_vulnerability_severity"]]:
-                        components[bom_ref]["max_vulnerability_severity"] = vuln_severity
+                if vulnerability_data not in components[bom_ref]["vulnerabilities"]:
+                    components[bom_ref]["vulnerabilities"].append(vulnerability_data)
+                if VALID_SEVERITIES[vuln_severity] > VALID_SEVERITIES[components[bom_ref]["max_vulnerability_severity"]]:
+                    components[bom_ref]["max_vulnerability_severity"] = vuln_severity
 
     return components, metadata_info
 
 
-def parse_string(input_string, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss):
+def parse_string(input_string):
     custom_print("Parsing input string...")
     data = json.loads(input_string)
-    return parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
+    return parse_json_data(data)
 
 
-def parse_file(input_file_path, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss):
+def parse_file(input_file_path):
     custom_print("Parsing input file...")
-    try:
-        with open(input_file_path, 'r') as file:
-            data = json.load(file)
-    except Exception as e:
-        with open(input_file_path, 'r', encoding='utf-8',  errors='replace') as file:
-            data = json.load(file)
-    return parse_json_data(data, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
+    with open(input_file_path, 'r') as file:
+        data = json.load(file)
+    return parse_json_data(data)
 
 
 def prepare_chart_element_name(component):
@@ -1401,8 +1122,6 @@ def prepare_chart_element_name(component):
 
     if len(component["vulnerabilities"]) > 0:
         name += "<br><br>Vulnerabilities:<br>"
-
-        name += "<ul style='margin-bottom: 0'>"
 
         vulns = {}
         for vulnerability in component["vulnerabilities"]:
@@ -1415,15 +1134,13 @@ def prepare_chart_element_name(component):
             vulns_to_be_shown = vulns_to_be_shown[:10]
             vulns_to_be_shown.append("<li>...</li>")
 
+
         name += "".join(vulns_to_be_shown)
-        name += "</ul>"
 
     if len(component["license"]) > 0:
         if len(component["vulnerabilities"]) == 0:
             name += "<br>"
         name += "<br>License:<br>"
-
-        name += "<ul style='margin-bottom: 0'>"
 
         licenses = []
         for license in component["license"]:
@@ -1434,7 +1151,6 @@ def prepare_chart_element_name(component):
             licenses.append("<li>...</li>")
 
         name += "".join(licenses)
-        name += "</ul>"
 
     return name
 
@@ -1459,75 +1175,61 @@ def format_dependency_chain(parents_branch, depends_on):
     return " --> ".join(parents_branch)
 
 
-class ChildrenGatherer:
+def get_children(components, component, parents):
+    children = []
+    value = 0
+    has_vulnerable_children_or_is_vulnerable = False
+    if len(component["vulnerabilities"]) > 0:
+        has_vulnerable_children_or_is_vulnerable = True
+    for depends_on in component["depends_on"]:
+        parents_branch = copy.deepcopy(parents)
+        child_name = prepare_chart_element_name(components[depends_on])
+        child_component = components[depends_on]
+        child_component["visited"] = True
+        if depends_on not in parents_branch:  # this is done to avoid infinite recursion in case of circular dependencies
+            parents_branch.append(depends_on)
+            child_children, children_value, has_vulnerable_children_or_is_vulnerable = get_children(components, child_component, parents_branch)
+            if len(child_component["vulnerabilities"]) > 0 or child_component["has_transitive_vulnerabilities"] is True or has_vulnerable_children_or_is_vulnerable is True:
+                component["has_transitive_vulnerabilities"] = True
+                add_transitive_vulnerabilities_to_component(component, child_component["vulnerabilities"])
+                add_transitive_vulnerabilities_to_component(component, child_component["transitive_vulnerabilities"])
+                has_vulnerable_children_or_is_vulnerable = True
 
-    def __init__(self):
-        self.segments_count = 0
-        self.SEGMENTS_THRESHOLD = 100000
-
-    def get_children(self, components, component, parents):
-        children = []
-        value = 0
-        has_vulnerable_children_or_is_vulnerable = False
-        if len(component["vulnerabilities"]) > 0:
-            has_vulnerable_children_or_is_vulnerable = True
-        for depends_on in component["depends_on"]:
-            parents_branch = copy.deepcopy(parents)
-            child_name = prepare_chart_element_name(components[depends_on])
-            child_component = components[depends_on]
-            child_component["visited"] = True
-            if depends_on not in parents_branch:  # this is done to avoid infinite recursion in case of circular dependencies
-                parents_branch.append(depends_on)
-                child_children, children_value, has_vulnerable_children_or_is_vulnerable = self.get_children(components, child_component, parents_branch)
-
-                self.segments_count += len(child_children)
-
-                if self.segments_count > self.SEGMENTS_THRESHOLD:
-                    raise Exception("Reached segments threshold")
+            value += children_value
+            
+            children.append({"name": child_name,
+                             "children": child_children,
+                             "value": children_value,
+                             "itemStyle": determine_style(child_component)
+                             })
+        else:
+            custom_print(f"WARNING: component with bom-ref '{depends_on}' may be a circular dependency. Dependency chain: {format_dependency_chain(parents_branch, depends_on)}")
+            value += 1
+            for child_depends_on in child_component["depends_on"]:
+                child_depends_on = components[child_depends_on]
+                if len(child_depends_on["vulnerabilities"]) > 0 or child_depends_on["has_transitive_vulnerabilities"] is True:
+                    child_component["has_transitive_vulnerabilities"] = True
+                    add_transitive_vulnerabilities_to_component(child_component, child_depends_on["vulnerabilities"])
+                    add_transitive_vulnerabilities_to_component(child_component, child_depends_on["transitive_vulnerabilities"])
                 
-                if len(child_component["vulnerabilities"]) > 0 or child_component["has_transitive_vulnerabilities"] is True or has_vulnerable_children_or_is_vulnerable is True:
-                    component["has_transitive_vulnerabilities"] = True
-                    add_transitive_vulnerabilities_to_component(component, child_component["vulnerabilities"])
-                    add_transitive_vulnerabilities_to_component(component, child_component["transitive_vulnerabilities"])
-                    has_vulnerable_children_or_is_vulnerable = True
 
-                value += children_value
-                
-                children.append({"name": child_name,
-                                 "children": child_children,
-                                 "value": children_value,
-                                 "itemStyle": determine_style(child_component)
-                                 })
-            else:
-                custom_print(f"WARNING: component with bom-ref '{depends_on}' may be a circular dependency. Dependency chain: {format_dependency_chain(parents_branch, depends_on)}")
-                value += 1
-                for child_depends_on in child_component["depends_on"]:
-                    child_depends_on = components[child_depends_on]
-                    if len(child_depends_on["vulnerabilities"]) > 0 or child_depends_on["has_transitive_vulnerabilities"] is True:
-                        child_component["has_transitive_vulnerabilities"] = True
-                        add_transitive_vulnerabilities_to_component(child_component, child_depends_on["vulnerabilities"])
-                        add_transitive_vulnerabilities_to_component(child_component, child_depends_on["transitive_vulnerabilities"])
-                    
+            children.append({"name": child_name,
+                             "children": [],
+                             "value": 1,
+                             "itemStyle": determine_style(child_component)
+                             })
 
-                children.append({"name": child_name,
-                                 "children": [],
-                                 "value": 1,
-                                 "itemStyle": determine_style(child_component)
-                                 })
+    if value == 0:
+        value = 1
 
-        if value == 0:
-            value = 1
-
-        return children, value, has_vulnerable_children_or_is_vulnerable
+    return children, value, has_vulnerable_children_or_is_vulnerable
 
 
 def add_root_component(components, component, data, bom_ref):
     component["visited"] = True
     parents = [bom_ref]
     root_name = prepare_chart_element_name(component)
-
-    children_gatherer = ChildrenGatherer()
-    root_children, root_value, has_vulnerable_children_or_is_vulnerable = children_gatherer.get_children(components, component, parents)
+    root_children, root_value, has_vulnerable_children_or_is_vulnerable = get_children(components, component, parents)
 
     if has_vulnerable_children_or_is_vulnerable is True:
         component["has_transitive_vulnerabilities"] = True
@@ -1574,7 +1276,7 @@ def component_badge_for_table(component):
         badge_class = 'bg-orange'
     elif component["max_vulnerability_severity"] == "low":
         badge_class = 'bg-yellow'
-    elif component["max_vulnerability_severity"] in ["information", "info", "unknown"]:
+    elif component["max_vulnerability_severity"] in ["information", "info"]:
         badge_class = 'bg-success'
     elif component["max_vulnerability_severity"] == "clean":
         if component["has_transitive_vulnerabilities"]:
@@ -1597,7 +1299,7 @@ def get_vulnerability_badge_by_severity(severity):
         return 'bg-orange'
     elif severity == "low":
         return 'bg-yellow'
-    elif severity in ["information", "info", "unknown"]:
+    elif severity in ["information", "info"]:
         return 'bg-success'
     return ''
 
@@ -1697,150 +1399,14 @@ def build_components_table_content(components):
     return "".join(rows)
 
 
-def is_cve(string):
-    pattern = r'^CVE-\d{4}-\d{4,}$'
-    return bool(re.match(pattern, string))
-
-
-def extract_year_and_first_digit(cve_string):
-    pattern = r'^CVE-(\d{4})-(\d)(\d*)$'
-    match = re.match(pattern, cve_string)
-    if match:
-        year = match.group(1)
-        first_digit = match.group(2)
-        return year, first_digit
-    else:
-        return None, None
-
-
-def get_epss(cve, epss_cache):
-    cve = cve.upper().strip()
-
-    if not is_cve(cve):
-        return "-"
-
-    year, first_digit = extract_year_and_first_digit(cve)
-
-    cache_key = f"{year}-{first_digit}"
-
-    chunk_url = f"https://lucacapacci.github.io/epss/data_groups/epss_scores_{year}_{first_digit}.csv"
-
-    if cache_key in epss_cache:
-        epss_data = epss_cache[cache_key]
-    else:
-        custom_print(f"Getting EPSS data from {chunk_url}")
-
-        if __name__ == "__web__":
-            resp = fetchDataSync(chunk_url)
-            resp_status_code = resp.status
-            resp_text = resp.responseText
-        else:
-            resp = requests.get(chunk_url)
-            resp_status_code = resp.status_code
-            resp_text = resp.text
-
-        if resp_status_code == 404:
-            epss_cache[cache_key] = None
-            return "-"
-
-        if resp_status_code != 200:
-            epss_cache[cache_key] = None
-            custom_print(f"Unexpected status code ({resp_status_code}) for URL {chunk_url}")
-            return "-"
-
-        epss_data = resp_text
-        epss_cache[cache_key] = epss_data
-
-    if epss_data is None:
-        return "-"
-
-    lines = epss_data.splitlines()
-
-    headers = []
-    for row in csv.reader(lines[1:]):
-        headers = row
-        break
-
-    for row in csv.reader(lines[2:]):
-        if row[headers.index('cve')].upper().strip() == cve:
-            decimal_number = Decimal(row[headers.index('epss')]).normalize()
-            return f"{decimal_number}"
-
-    return "-"
-
-
-def get_cisa_kev(cve, cisa_kev_cache):
-    cve = cve.upper().strip()
-
-    if not is_cve(cve):
-        return "-"
-
-    year, first_digit = extract_year_and_first_digit(cve)
-
-    cache_key = f"{year}-{first_digit}"
-
-    chunk_url = f"https://lucacapacci.github.io/cisa_kev/data_groups/cisa_kev_{year}_{first_digit}.csv"
-
-    if cache_key in cisa_kev_cache:
-        cisa_kev_data = cisa_kev_cache[cache_key]
-    else:
-        custom_print(f"Getting CISA KEV data from {chunk_url}")
-        if __name__ == "__web__":
-            resp = fetchDataSync(chunk_url)
-            resp_status_code = resp.status
-            resp_text = resp.responseText
-        else:
-            resp = requests.get(chunk_url)
-            resp_status_code = resp.status_code
-            resp_text = resp.text
-
-        if resp_status_code == 404:
-            cisa_kev_cache[cache_key] = None
-            return "-"
-
-        if resp_status_code != 200:
-            cisa_kev_cache[cache_key] = None
-            custom_print(f"Unexpected status code ({resp_status_code}) for URL {chunk_url}")
-            return "-"
-
-        cisa_kev_data = resp_text
-        cisa_kev_cache[cache_key] = cisa_kev_data
-
-    if cisa_kev_data is None:
-        return "-"
-
-    lines = cisa_kev_data.splitlines()
-
-    headers = []
-    for row in csv.reader(lines):
-        headers = row
-        break
-
-    for row in csv.reader(lines[1:]):
-        if row[headers.index('cveID')].upper().strip() == cve:
-            return row[headers.index('dateAdded')]
-
-    return "-"
-
-
-def build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves=False):
-    max_epss = "0.0"
-    kev_counter = 0
-
-    first_row = """<thead>
+def build_vulnerabilities_table_content(vulnerabilities, components):
+    rows = ["""<thead>
         <tr>
             <th>Vulnerability</th>
             <th>Severity</th>
             <th>Score</th>
             <th>Vector</th>
-            """
-
-    if enrich_cves is True:
-        first_row += """<th>EPSS</th>
-            <th>CISA KEV Date</th>
-            """
-
-    first_row += """<th>Directly vulnerable <br>components</th>
+            <th>Directly vulnerable <br>components</th>
             <th>Transitively vulnerable <br>components</th>
         </tr>
         <tr>
@@ -1848,19 +1414,10 @@ def build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves
             <th><input type="text" placeholder="Search Severity" class="form-control search-in-table-vuln"></th>
             <th><input type="text" placeholder="Search Score" class="form-control search-in-table-vuln"></th>
             <th><input type="text" placeholder="Search Vector" class="form-control search-in-table-vuln"></th>
-            """
-
-    if enrich_cves is True:
-        first_row += """<th><input type="text" placeholder="Search EPSS" class="form-control search-in-table-vuln"></th>
-            <th><input type="text" placeholder="Search CISA KEV Date" class="form-control search-in-table-vuln"></th>
-            """
-
-    first_row += """<th><input type="text" placeholder="Search Directly vulnerable components" class="form-control search-in-table-vuln"></th>
+            <th><input type="text" placeholder="Search Directly vulnerable components" class="form-control search-in-table-vuln"></th>
             <th><input type="text" placeholder="Search Transitively vulnerable components" class="form-control search-in-table-vuln"></th>
         </tr>
-    </thead>"""
-
-    rows = [first_row]
+    </thead>"""]
     rows.append("<tbody>")
 
     for _, vulnerability in vulnerabilities.items():
@@ -1871,16 +1428,6 @@ def build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves
         rows.append("<td>" + f'{html.escape(vulnerability["severity"].title())}' + "</td>")
         rows.append("<td>" + f'{vulnerability["score"]}' + "</td>")
         rows.append("<td>" + f'{html.escape(vulnerability["vector"])}' + "</td>")
-
-        if enrich_cves is True:
-            current_epss = vulnerability["epss"]
-            rows.append("<td>" + f'{html.escape(current_epss)}' + "</td>")
-            current_cisa_kev = vulnerability["cisa_kev"]
-            rows.append("<td>" + f'{html.escape(current_cisa_kev)}' + "</td>")
-            if current_epss > max_epss:
-                max_epss = current_epss
-            if current_cisa_kev != "-":
-                kev_counter += 1
 
         if len(vulnerability["directly_vulnerable_components"]) == 0:
             rows.append("<td>-</td>")
@@ -1906,10 +1453,10 @@ def build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves
 
     rows.append("</tbody>")
 
-    return "".join(rows), max_epss, kev_counter
+    return "".join(rows)
 
 
-def build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components, enrich_cves, max_epss, kev_counter):
+def build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components):
     rows = []
 
     # headers
@@ -1930,29 +1477,25 @@ def build_metadata_table_content(metadata_info, counter_critical, counter_high, 
 
     vulnerabilities_td = ""
     if counter_critical > 0:
-        vulnerabilities_td += f'<span style="display: none;">Critical: </span><span class="badge bg-dark-red">{counter_critical}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-dark-red">{counter_critical}</span>&nbsp;'
     else:
-        vulnerabilities_td += f'<span style="display: none;">Critical: </span><span class="badge bg-dark-red opaque">{counter_critical}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-dark-red opaque">{counter_critical}</span>&nbsp;'
     if counter_high > 0:
-        vulnerabilities_td += f'<span style="display: none;">High: </span><span class="badge bg-danger">{counter_high}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-danger">{counter_high}</span>&nbsp;'
     else:
-        vulnerabilities_td += f'<span style="display: none;">High: </span><span class="badge bg-danger opaque">{counter_high}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-danger opaque">{counter_high}</span>&nbsp;'
     if counter_medium > 0:
-        vulnerabilities_td += f'<span style="display: none;">Medium: </span><span class="badge bg-orange">{counter_medium}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-orange">{counter_medium}</span>&nbsp;'
     else:
-        vulnerabilities_td += f'<span style="display: none;">Medium: </span><span class="badge bg-orange opaque">{counter_medium}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-orange opaque">{counter_medium}</span>&nbsp;'
     if counter_low > 0:
-        vulnerabilities_td += f'<span style="display: none;">Low: </span><span class="badge bg-yellow">{counter_low}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-yellow">{counter_low}</span>&nbsp;'
     else:
-        vulnerabilities_td += f'<span style="display: none;">Low: </span><span class="badge bg-yellow opaque">{counter_low}</span><span style="display: none;">, </span>&nbsp;'
+        vulnerabilities_td += f'<span class="badge bg-yellow opaque">{counter_low}</span>&nbsp;'
     if counter_info > 0:
-        vulnerabilities_td += f'<span style="display: none;">Information: </span><span class="badge bg-success">{counter_info}</span>'
+        vulnerabilities_td += f'<span class="badge bg-success">{counter_info}</span>&nbsp;'
     else:
-        vulnerabilities_td += f'<span style="display: none;">Information: </span><span class="badge bg-success opaque">{counter_info}</span>'
-
-    if enrich_cves is True:
-        vulnerabilities_td += f'<span style="display: none;">, </span><hr><i>Max EPSS</i>&nbsp;&#x2192;&nbsp;{html.escape(max_epss)}<span style="display: none;">, </span><br>'
-        vulnerabilities_td += f'<i>Vulnerabilities in CISA KEV</i>&nbsp;&#x2192;&nbsp;{kev_counter}'
+        vulnerabilities_td += f'<span class="badge bg-success opaque">{counter_info}</span>&nbsp;'
 
     rows.append(f"<td>{vulnerabilities_td}</td>")
 
@@ -2011,7 +1554,7 @@ def get_only_vulnerable_components(components):
     return vulnerable_components
 
 
-def parse_vulnerabilities(components, enrich_cves):
+def parse_vulnerabilities(components):
     vulnerabilities = {}
 
     counter_critical = 0
@@ -2035,9 +1578,6 @@ def parse_vulnerabilities(components, enrich_cves):
                                              "vector": vulnerability['vector'],
                                              "directly_vulnerable_components": set(),
                                              "transitively_vulnerable_components": set()}
-                if enrich_cves is True:
-                    vulnerabilities[vuln_key]["epss"] = vulnerability['epss']
-                    vulnerabilities[vuln_key]["cisa_kev"] = vulnerability['cisa_kev']
 
                 if vulnerability['severity'] == "critical":
                     counter_critical += 1
@@ -2063,10 +1603,6 @@ def parse_vulnerabilities(components, enrich_cves):
                                              "directly_vulnerable_components": set(),
                                              "transitively_vulnerable_components": set()}
 
-                if enrich_cves is True:
-                    vulnerabilities[vuln_key]["epss"] = vulnerability['epss']
-                    vulnerabilities[vuln_key]["cisa_kev"] = vulnerability['cisa_kev']
-
                 if vulnerability['severity'] == "critical":
                     counter_critical += 1
                 elif vulnerability['severity'] == "high":
@@ -2084,120 +1620,34 @@ def parse_vulnerabilities(components, enrich_cves):
     return vulnerabilities, counter_critical, counter_high, counter_medium, counter_low, counter_info
 
 
-def purge_components(components):
-    already_seen = {}
-    doubles = {}
-    # 1) passes them all and keeps track of duplicate bom-refs with respect to the group-name-version pair; each time it finds a duplicate it also saves the unique bom-ref that will survive
-    for bom_ref, component in components.items():
-        current_id = component["name"] if "name" in component else "-"
-        current_id += "--"
-        current_id += component["version"] if "version" in component else "-"
-        current_id += "--"
-        current_id += component["group"] if "group" in component else "-"
-        if current_id in already_seen:
-            doubles[bom_ref] = already_seen[current_id]
-        else:
-            already_seen[current_id] = bom_ref
-
-    # 2) deletes from "components" entries with duplicate bom-refs
-    for double_bom_ref in doubles:
-        del components[double_bom_ref]
-
-    # 3) passes all remaining "components" again and in all "dependency_of" and "depends_on" fields replaces the old bom-refs with the new ones (keeping only one copy, if the new one was already present)
-    for double_bom_ref, original_bom_ref in doubles.items():
-        for _, component in components.items():
-            if double_bom_ref in component["dependency_of"]:
-                component["dependency_of"].remove(double_bom_ref)
-                component["dependency_of"].add(original_bom_ref)
-            if double_bom_ref in component["depends_on"]:
-                component["depends_on"].remove(double_bom_ref)
-                component["depends_on"].add(original_bom_ref)
-
-
-def augment_components_data(components):
-    previous_total_transitive_vulnerabilities = -1
-
-    while True:
-        total_transitive_vulnerabilities = 0
-
-        for bom_ref, component in components.items():
-            if component["visited"] is True:
-                continue
-
-            if len(component["vulnerabilities"]) > 0:
-                component["visited"] = True
-
-            for depends_on in component["depends_on"]:
-                child = components[depends_on]
-                add_transitive_vulnerabilities_to_component(component, child["vulnerabilities"])
-                add_transitive_vulnerabilities_to_component(component, child["transitive_vulnerabilities"])
-
-            if len(component["transitive_vulnerabilities"]) > 0:
-                component["has_transitive_vulnerabilities"] = True
-            total_transitive_vulnerabilities += len(component["transitive_vulnerabilities"])
-
-        if total_transitive_vulnerabilities == previous_total_transitive_vulnerabilities:
-            break
-
-        previous_total_transitive_vulnerabilities = total_transitive_vulnerabilities
-
-
-def main_cli(input_file_path, output_file_path, enrich_cves, segment_limit, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss):
+def main_cli(input_file_path, output_file_path):
     if not os.path.exists(input_file_path):
         custom_print(f"File does not exist: '{input_file_path}'")
         exit()
 
     try:
-        components, metadata_info = parse_file(input_file_path, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
+        components, metadata_info = parse_file(input_file_path)
     except Exception as e:
         custom_print(f"Error parsing input file: {e}")
         exit()
 
-    purge_components(components)
-
-    create_with_charts = True
-
     # chart with all components
-    try:
-        echart_data_all_components = build_echarts_data(components)
-    except Exception as e:
-        if str(e) == "Reached segments threshold":
-            custom_print("Too many dependency relationships, I will generate tables without charts.")
-            create_with_charts = False
-        else:
-            raise e
+    echart_data_all_components = build_echarts_data(components)
+    double_check_if_all_components_were_taken_into_account(components, echart_data_all_components)
 
-    if create_with_charts is True:
-        double_check_if_all_components_were_taken_into_account(components, echart_data_all_components)
-    else:
-        augment_components_data(components)
+    vulnerabilities, counter_critical, counter_high, counter_medium, counter_low, counter_info = parse_vulnerabilities(components)
 
-    vulnerabilities, counter_critical, counter_high, counter_medium, counter_low, counter_info = parse_vulnerabilities(components, enrich_cves)
-
-    if create_with_charts is True:
-        # chart with only vulnerable components
-        vulnerable_components = get_only_vulnerable_components(components)
-        echart_data_vulnerable_components = build_echarts_data(vulnerable_components)
-        double_check_if_all_components_were_taken_into_account(vulnerable_components, echart_data_vulnerable_components)
+    # chart with only vulnerable components
+    vulnerable_components = get_only_vulnerable_components(components)
+    echart_data_vulnerable_components = build_echarts_data(vulnerable_components)
+    double_check_if_all_components_were_taken_into_account(vulnerable_components, echart_data_vulnerable_components)
 
     components_table_content = build_components_table_content(components)
-    vulnerabilities_table_content, max_epss, kev_counter = build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves)
-    metadata_table_content = build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components, enrich_cves, max_epss, kev_counter)
-
-    html_content = HTML_TEMPLATE
-
-    if segment_limit is False:
-        html_content = html_content.replace('turnChartIntoImageIfTooManySegments("chart-container-inner");', "")
+    metadata_table_content = build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components)
+    vulnerabilities_table_content = build_vulnerabilities_table_content(vulnerabilities, components)
     
-    if create_with_charts is True:
-        html_content = html_content.replace("<CHART_DATA_HERE>", json.dumps(echart_data_all_components, indent=2))
-        html_content = html_content.replace("<CHART_DATA_VULN_HERE>", json.dumps(echart_data_vulnerable_components, indent=2))
-        html_content = html_content.replace("<SHOW_WARNING_IF_CHART_WAS_NOT_CREATED>", '');
-    else:
-        html_content = html_content.replace("<CHART_DATA_HERE>", "[]")
-        html_content = html_content.replace("<CHART_DATA_VULN_HERE>", "[]")
-        html_content = html_content.replace("<SHOW_WARNING_IF_CHART_WAS_NOT_CREATED>", 'showWarningIfChartWasNotCreated("chart-container-inner");');
-
+    html_content = HTML_TEMPLATE.replace("<CHART_DATA_HERE>", json.dumps(echart_data_all_components, indent=2))
+    html_content = html_content.replace("<CHART_DATA_VULN_HERE>", json.dumps(echart_data_vulnerable_components, indent=2))
     html_content = html_content.replace("<FILE_NAME_HERE>", html.escape(os.path.basename(input_file_path)))
     html_content = html_content.replace("<COMPONENTS_TABLE_HERE>", components_table_content)
     html_content = html_content.replace("<VULNERABILITIES_TABLE_HERE>", vulnerabilities_table_content)
@@ -2207,50 +1657,32 @@ def main_cli(input_file_path, output_file_path, enrich_cves, segment_limit, only
     custom_print("Done.")
 
 
-def main_web(input_string, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss):
+def main_web(input_string):
     try:
-        components, metadata_info = parse_string(input_string, enrich_cves, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
+        components, metadata_info = parse_string(input_string)
     except Exception as e:
         custom_print(f"Error parsing input string: {e}")
         exit()
 
-    purge_components(components)
-
-    create_with_charts = True
-
     # chart with all components
-    try:
-        echart_data_all_components = build_echarts_data(components)
-    except Exception as e:
-        if str(e) == "Reached segments threshold":
-            custom_print("Too many dependency relationships, I will generate tables without charts.")
-            create_with_charts = False
-        else:
-            raise e
+    echart_data_all_components = build_echarts_data(components)
+    double_check_if_all_components_were_taken_into_account(components, echart_data_all_components)
+    echart_data_all_components = json.dumps(echart_data_all_components, indent=2)
 
-    if create_with_charts is True:
-        double_check_if_all_components_were_taken_into_account(components, echart_data_all_components)
-        echart_data_all_components = json.dumps(echart_data_all_components, indent=2)
-    else:
-        augment_components_data(components)
-        echart_data_all_components = "[]"
+    vulnerabilities, counter_critical, counter_high, counter_medium, counter_low, counter_info = parse_vulnerabilities(components)
 
-    vulnerabilities, counter_critical, counter_high, counter_medium, counter_low, counter_info = parse_vulnerabilities(components, enrich_cves)
-
-    if create_with_charts is True:
-        # chart with only vulnerable components
-        vulnerable_components = get_only_vulnerable_components(components)
-        echart_data_vulnerable_components = build_echarts_data(vulnerable_components)
-        double_check_if_all_components_were_taken_into_account(vulnerable_components, echart_data_vulnerable_components)
-        echart_data_vulnerable_components = json.dumps(echart_data_vulnerable_components, indent=2)
-    else:
-        echart_data_vulnerable_components = "[]"
+    # chart with only vulnerable components
+    vulnerable_components = get_only_vulnerable_components(components)
+    echart_data_vulnerable_components = build_echarts_data(vulnerable_components)
+    double_check_if_all_components_were_taken_into_account(vulnerable_components, echart_data_vulnerable_components)
+    echart_data_vulnerable_components = json.dumps(echart_data_vulnerable_components, indent=2)
 
     components_table_content = build_components_table_content(components)
-    vulnerabilities_table_content, max_epss, kev_counter = build_vulnerabilities_table_content(vulnerabilities, components, enrich_cves)
-    metadata_table_content = build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components, enrich_cves, max_epss, kev_counter)
+    metadata_table_content = build_metadata_table_content(metadata_info, counter_critical, counter_high, counter_medium, counter_low, counter_info, components)
+
+    vulnerabilities_table_content = build_vulnerabilities_table_content(vulnerabilities, components)
     
-    return echart_data_all_components, echart_data_vulnerable_components, components_table_content, metadata_table_content, vulnerabilities_table_content, create_with_charts
+    return echart_data_all_components, echart_data_vulnerable_components, components_table_content, metadata_table_content, vulnerabilities_table_content
 
 
 if __name__ == "__main__":
@@ -2258,28 +1690,17 @@ if __name__ == "__main__":
  ▗▄▄▖▗▖ ▗▖▗▖  ▗▖ ▗▄▄▖▗▖ ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖
 ▐▌   ▐▌ ▐▌▐▛▚▖▐▌▐▌   ▐▌ ▐▌  █  ▐▛▚▖▐▌▐▌   
  ▝▀▚▖▐▌ ▐▌▐▌ ▝▜▌ ▝▀▚▖▐▛▀▜▌  █  ▐▌ ▝▜▌▐▛▀▀▘
-▗▄▄▞▘▝▚▄▞▘▐▌  ▐▌▗▄▄▞▘▐▌ ▐▌▗▄█▄▖▐▌  ▐▌▐▙▄▄▖
+▗▄▄▞▘▝▚▄▞▘▐▌  ▐▌▗▄▄▞▘▐▌ ▐▌▗▄█▄▖▐▌  ▐▌▐▙▄▄▖ v{VERSION}
     ''')
 
     parser = argparse.ArgumentParser(description=f"{NAME}: actionable CycloneDX visualization")
+    parser.add_argument("-v", "--version", help="show program version", action="store_true")
     parser.add_argument("-i", "--input", help="path of input CycloneDX file")
     parser.add_argument("-o", "--output", help="path of output HTML file")
-
-    parser.add_argument("-e", "--enrich", help="enrich CVEs with EPSS and CISA KEV", action="store_true")
-    parser.add_argument("-k", "--only-in-cisa-kev", help="show only vulnerabilities in CISA KEV", action="store_true")
-
-    parser.add_argument("-cs", "--only-critical-severity", help="show only vulnerabilities with critical severity", action="store_true")
-    parser.add_argument("-hs", "--only-high-severity-or-above", help="show only vulnerabilities with high severity or above", action="store_true")
-    parser.add_argument("-ms", "--only-medium-severity-or-above", help="show only vulnerabilities with medium severity or above", action="store_true")
-    parser.add_argument("-ls", "--only-low-severity-or-above", help="show only vulnerabilities with low severity or above", action="store_true")
-
-    parser.add_argument("-c", "--min-cvss", help="show only vulnerabilities with score equal to or greater than the selected value, which can be in rage 0.0-10.0")
-
-    parser.add_argument("-p", "--min-epss", help="show only vulnerabilities with EPSS equal to or greater than the selected value, which can be in rage 0.00-1.00")
-
-    parser.add_argument("-n", "--no-segment-limit", help="prevent the automatic conversion of charts with many segments into still images", action="store_true")
-
     args = parser.parse_args()
+
+    if args.version:
+        exit()
 
     if not args.input or not args.output:
         parser.print_help()
@@ -2287,85 +1708,14 @@ if __name__ == "__main__":
 
     input_file_path = args.input
     output_file_path = args.output
-
-    enrich_cves = False
-    if args.enrich:
-        enrich_cves = True
-
-    segment_limit = not args.no_segment_limit
-
-    only_in_cisa_kev = False
-    if args.only_in_cisa_kev:
-        only_in_cisa_kev = True
-
-    if enrich_cves is False and only_in_cisa_kev is True:
-        custom_print("Argument '--only-in-cisa-kev' can be used only in conjunction with '--enrich' argument")
-
-    only_critical_severity = False
-    if args.only_critical_severity:
-        only_critical_severity = True
-
-    only_high_severity_or_above = False
-    if args.only_high_severity_or_above:
-        only_high_severity_or_above = True
-
-    only_medium_severity_or_above = False
-    if args.only_medium_severity_or_above:
-        only_medium_severity_or_above = True
-
-    only_low_severity_or_above = False
-    if args.only_low_severity_or_above:
-        only_low_severity_or_above = True
-
-    min_cvss = args.min_cvss
-    if min_cvss is None:
-        min_cvss = 0.0
-    else:
-        try:
-            min_cvss = float(min_cvss)
-        except Exception as e:
-            custom_print(f"Error with '--min-cvss' argument. Provided value is not a float: {min_cvss}")
-            exit()
-        if min_cvss < 0.0 or min_cvss > 10.0:
-            custom_print(f"Error with '--min-cvss' argument. Provided value is not in range 0.0-10.0: {min_cvss}")
-            exit()
-
-    min_epss = args.min_epss
-    if min_epss is None:
-        min_epss = 0.00
-    else:
-        try:
-            min_epss = float(min_epss)
-        except Exception as e:
-            custom_print(f"Error with '--min-epss' argument. Provided value is not a float: {min_epss}")
-            exit()
-        if min_epss < 0.00 or min_epss > 1.00:
-            custom_print(f"Error with '--min-epss' argument. Provided value is not in range 0.00-1.00: {min_epss}")
-            exit()
-    if enrich_cves is False and min_epss > 0.00:
-        custom_print("Argument '--min-epss' can be used only in conjunction with '--enrich' argument")
-
-    main_cli(input_file_path, output_file_path, enrich_cves, segment_limit, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
-
+    main_cli(input_file_path, output_file_path)
 
 
 if __name__ == "__web__":
-    input_data = INPUT_DATA
-    do_enrichment = DO_ENRICHMENT
-    only_in_cisa_kev = ONLY_IN_CISA_KEV
-    only_critical_severity = ONLY_CRITICAL_SEVERITY
-    only_high_severity_or_above = ONLY_HIGH_SEVERITY_OR_ABOVE
-    only_medium_severity_or_above = ONLY_MEDIUM_SEVERITY_OR_ABOVE
-    only_low_severity_or_above = ONLY_LOW_SEVERITY_OR_ABOVE
-    min_cvss = MIN_CVSS
-    min_epss = MIN_EPSS
-
-
-    echart_data_all_components, echart_data_vulnerable_components, components_table_content, metadata_table_content, vulnerabilities_table_content, chart_was_created = main_web(input_data, do_enrichment, only_in_cisa_kev, only_critical_severity, only_high_severity_or_above, only_medium_severity_or_above, only_low_severity_or_above, min_cvss, min_epss)
+    echart_data_all_components, echart_data_vulnerable_components, components_table_content, metadata_table_content, vulnerabilities_table_content = main_web(INPUT_DATA)
     OUTPUT_CHART_DATA = echart_data_all_components
     OUTPUT_CHART_DATA_VULNERABLE_COMPONENTS = echart_data_vulnerable_components
     OUTPUT_COMPONENTS_TABLE_DATA = components_table_content
     OUTPUT_METADATA_TABLE_DATA = metadata_table_content
     OUTPUT_VULNERABILITIES_TABLE_DATA = vulnerabilities_table_content
-    CHART_WAS_CREATED = chart_was_created
 
