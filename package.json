@@ -1,0 +1,44 @@
+{
+  "name": "react-sunshine",
+  "version": "0.1.0",
+  "description": "CycloneDX Sunshine visualization as reusable JS core and React wrapper.",
+  "type": "module",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "import": "./dist/core/index.js"
+    },
+    "./react": {
+      "import": "./dist/react/ReactSunshine.js"
+    }
+  },
+  "scripts": {
+    "build": "node ./scripts/build.js",
+    "lint": "echo 'No lint configured'",
+    "test": "echo 'No tests configured'"
+  },
+  "keywords": [
+    "cyclonedx",
+    "sbom",
+    "visualization",
+    "react",
+    "echarts"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "echarts": "^5.5.1",
+    "prop-types": "^15.8.1"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  }
+}
