@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sunshine - SBOM visualization tool</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.8/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.8/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+
+    <style>
+        body {
+            margin: 20px;
+            height: 100vh;
+            background: linear-gradient(to right, #032c57, #1C538E);
+        }
+        #output {
+            white-space: pre-line;
+            background-color: #ffffff;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-family: "Courier New", "Lucida Console", monospace;
+        }
+
+        #chart-container {
+            background-color: #ffffff;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        #chart-container-inner, #chart-container-only-vulnerable-inner {
+            background-color: #ffffff;
+            padding: 10px;
+            position: relative;
+            height: 90vh;
+            overflow: hidden;
+        }
+        #chart-container-placeholder {
+            background-color: #fffffF;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        #table-container, #info-table-container, #vulnerabilities-table-container {
+            background-color: #fffffF;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #table-container-placeholder, #info-table-container-placeholder, #vulnerabilities-table-container-placeholder {
+            background-color: #fffffF;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        #upload-file-container {
+            background-color: #fffffF;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        #file-input {
+            margin: 20px;
+        }
+
+        .dataTables_filter {
+            display: none;
+        }
+        th input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .dataTables_length {
+            padding-bottom: 10px !important;
+        }
+        .light-text {
+            color: #baccde;
+        }
+
+        .dt-buttons {
+            float: right;
+        }
+        .active>.page-link, .page-link.active {
+            background-color: #1C538E !important;
+            color: white !important;
+        }
+
+        .page-link {
+            color: #1C538E;
+        }
+
+        #components-table_paginate, #vulnerabilities-table_paginate {
+            float: right;
+            margin-top: -33px;
+        }
+
+        .bg-dark-red {
+            background-color: #a10a0a;
+            color: white;
+        }
+
+        .bg-orange {
+            background-color: #ff9335;
+            color: white;
+        }
+
+        .bg-yellow {
+            background-color: #fccd58;
+            color: white;
+        }
+
+        .bg-light-blue {
+            background-color: #9fc5e8;
+            color: black;
+        }
+
+        #footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #032c57;
+            color: #baccde;
+            text-align: center;
+            z-index: 100000;
+        }
+
+        #footer a {
+            color: #baccde;
+        }
+
+        #info-table_paginate, #info-table_length, #info-table_info {
+            display: none;
+        }
+
+        .opaque {
+            opacity: 0.5;
+        }
+
+        @media print {
+            body {
+                background-color: transparent !important;
+                background-image: none !important;
+            }
+        }
+
+        .small-note {
+            font-size:8pt; 
+            color: grey;
+        }
+    
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/lzma@2.3.2/src/lzma_worker-min.js"></script>
+    <h1 class="light-text">Sunshine - SBOM visualization tool</h1>
+    <br>
+    <h3 class="light-text">CycloneDX JSON file</h3>
+    <div id="upload-file-container">Select a CycloneDX JSON file from your file system. All submitted data is processed locally within your browser, without being transmitted anywhere else.<input type="file" id="file-input" class="form-control" style="width: 50%;" accept=".json">
+        <ul>
+            <li>If you do not have a CycloneDX JSON file available, but just want to see what output is produced by the tool see a sample HTML output <a href="https://CycloneDX.github.io/Sunshine/sample_enriched.html">here with data enriched with EPSS and CISA KEV</a> or <a href="https://CycloneDX.github.io/Sunshine/sample.html">here without enriched data</a>.</li>
+            <li>If your SBOM file is not in the CycloneDX JSON format, such as SPDX or CycloneDX XML, you can convert it using <a href="https://CycloneDX.github.io/cyclonedx-web-tool/convert">CycloneDX Web Tool.</a></li>
+            <li>If you prefer using a standalone CLI version <a href="https://github.com/CycloneDX/Sunshine/">download it here.</a></li>
+        </ul>
+
+        <br>
+        <p>Settings:</p>
+        <table style="margin-left: 20px; margin-bottom: 10px">
+            <tr>
+                <td style="border-right: 1px solid; border-right-color: lightgrey; padding-right: 20px;">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" role="switch" id="enrich-check" checked>
+                      <label class="form-check-label" for="enrich-check">Enrich data with EPSS and CISA KEV</label>
+                    </div>
+                </td>
+
+                <td style="border-right: 1px solid; border-right-color: lightgrey; padding-right: 20px; padding-left: 20px;">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" role="switch" id="cisa-kev-check">
+                      <label class="form-check-label" for="cisa-kev-check">Show only vulnerabilities in CISA KEV</label>
+                      <p class="small-note"><i>Note: this setting can be used ony when data enrichment is enabled</i></p>
+                    </div>
+                </td>
+
+                <td style="border-right: 1px solid; border-right-color: lightgrey; padding-right: 10px; padding-left: 10px;">
+                    <div>Show only vulnerabilities with severity:</div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="radio" name="severity-switch" id="radio-any" value="severity-any" checked onchange="handleSeveritySwitchChange(this)">
+                      <label class="form-check-label" for="radio-any">
+                        Any
+                      </label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="radio" name="severity-switch" id="radio-critical" value="severity-critical" onchange="handleSeveritySwitchChange(this)">
+                      <label class="form-check-label" for="radio-critical">
+                        Critical
+                      </label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="radio" name="severity-switch" id="radio-high" value="severity-high" onchange="handleSeveritySwitchChange(this)">
+                      <label class="form-check-label" for="radio-high">
+                        High or above
+                      </label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="radio" name="severity-switch" id="radio-medium" value="severity-medium" onchange="handleSeveritySwitchChange(this)">
+                      <label class="form-check-label" for="radio-medium">
+                        Medium or above
+                      </label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="radio" name="severity-switch" id="radio-low" value="severity-low" onchange="handleSeveritySwitchChange(this)">
+                      <label class="form-check-label" for="radio-low">
+                        Low or above
+                      </label>
+                    </div>
+
+                </td>
+
+                <td style="border-right: 1px solid; border-right-color: lightgrey; padding-right: 20px; padding-left: 20px;">
+                    <label for="min-cvss" class="form-label">Show only vulnerabilities with CVSS equal to or greater than:</label>
+                    <div>
+                        <input 
+                          type="range" 
+                          class="form-range" 
+                          id="cvssRangeInput" 
+                          name="cvssRangeInput" 
+                          min="0" 
+                          max="10" 
+                          step="0.1" 
+                          value="0.0">
+                        <div>Selected CVSS: <span id="cvssRangeValue">0.0</span></div>
+                    </div>
+                    <script>
+                      const cvssRangeInput = document.getElementById('cvssRangeInput');
+                      const cvssRangeValue = document.getElementById('cvssRangeValue');
+
+                      cvssRangeInput.addEventListener('input', () => {
+                        var currentCvss = parseFloat(cvssRangeInput.value);
+                        cvssRangeValue.textContent = currentCvss.toFixed(1);
+                        handleCvssChange(currentCvss);
+                      });
+                    </script>
+                </td>
+
+                <td style="border-right: 1px solid; border-right-color: lightgrey; padding-right: 20px; padding-left: 20px;">
+                    <label for="min-cvss" class="form-label" id="min-epss-label">Show only vulnerabilities with EPSS equal to or greater than:</label>
+                    <div>
+                        <input 
+                          type="range" 
+                          class="form-range" 
+                          id="epssRangeInput" 
+                          name="epssRangeInput" 
+                          min="0" 
+                          max="100" 
+                          step="1" 
+                          value="0">
+                        <div><span id="epss-fixed-text">Selected EPSS:</span> <span id="epssRangeValue">0.00</span></div>
+                        <p class="small-note"><i>Note: this setting can be used ony when data enrichment is enabled</i></p>
+                    </div>
+                    <script>
+                      const epssRangeInput = document.getElementById('epssRangeInput');
+                      const epssRangeValue = document.getElementById('epssRangeValue');
+
+                      epssRangeInput.addEventListener('input', () => {
+                        var currentEpss = parseFloat(epssRangeInput.value).toFixed(2)/100;
+                        epssRangeValue.textContent = currentEpss.toFixed(2);
+                        handleEpssChange(currentEpss);
+                      });
+                    </script>
+                </td>
+
+            </tr>
+        </table>
+        <button type="button" class="btn btn-primary" id="apply-settings" disabled>Apply settings</button>
+
+
+    </div>
+
+    <br>
+    <h3 class="light-text">Summary</h3>
+    <div id="info-table-container" style="display: none">
+        <table id="info-table" class="table table-striped table-bordered" style="width:100%"></table>
+    </div>
+    <div id="info-table-container-placeholder" style="display: block">
+       Summary table will appear here...
+    </div>
+        
+    <br>
+    <h3 class="light-text">Components chart</h3>
+    <div id="chart-container" style="display: none">
+    This chart visualizes components and their dependencies, with each segment representing a single component. The chart provides a hierarchical view of the dependency structure, with relationships radiating outward from the core components.<br>
+    <ul>
+        <li><b>Innermost circle:</b> represents components that are independent and not dependencies for any other components.</li>
+        <li><b>Outer circles:</b> each segment represents a dependency of the corresponding segment in the circle immediately inside it. The farther a segment is from the center, the deeper the dependency level.</li>
+    </ul>
+    <i>Note: If there is only one circle, it means that no dependency relationships are defined in the input file.</i>
+    <br><br>
+    The colors of the segments indicate the vulnerability status of the components:
+    <ul>
+        <li><b>Dark red:</b> affected by at least one critical severity vulnerability.</li>
+        <li><b>Red:</b> affected by at least one high severity vulnerability.</li>
+        <li><b>Orange:</b> affected by at least one medium severity vulnerability.</li>  
+        <li><b>Yellow:</b> affected by at least one low severity vulnerability.</li>  
+        <li><b>Green:</b> affected by at least one informational severity vulnerability.</li>  
+        <li><b>Light blue:</b> not directly affected by vulnerabilities but has at least one vulnerable dependency.</li>  
+        <li><b>Grey:</b> neither the component nor its dependencies are affected by any vulnerabilities.</li>
+    </ul>
+    The chart is interactive:  
+    <ul>
+        <li><b>Hovering:</b> displays details about a component, including its name, version, and list of vulnerabilities.</li>
+        <li><b>Clicking:</b> refocuses the chart. The clicked segment becomes the center (second innermost circle), showing only that component and its dependencies. In this view, the innermost circle is always blue. Clicking the blue circle navigates back up one level in the dependency hierarchy.</li>
+    </ul>
+    <hr>
+    <div class="alert alert-warning" role="alert" id="sunburst-warning-too-big" style="display: none">WARNING: the chart is not displayed in interactive mode because there are too many dependency relationships. You can still explore components and relationships in the components table.</div>
+    <div class="alert alert-danger" role="alert" id="sunburst-danger-too-big" style="display: none">WARNING: the chart is not displayed because there are too many dependency relationships. You can still explore components and relationships in the components table.</div>
+    <div class="form-check" id="sunburst-selector-all">
+      <input class="form-check-input" type="radio" name="showComponentsSwitch" id="allComponents" value="allComponents" checked onchange="handleShowComponentsSwitchChange(this)">
+      <label class="form-check-label" for="allComponents">
+        Show all components
+      </label>
+    </div>
+    <div class="form-check" id="sunburst-selector-vulnerable">
+      <input class="form-check-input" type="radio" name="showComponentsSwitch" id="vulnerableComponents" value="vulnerableComponents" onchange="handleShowComponentsSwitchChange(this)">
+      <label class="form-check-label" for="vulnerableComponents">
+        Show only components with direct or transitive vulnerabilities
+      </label>
+    </div>
+    <hr>
+    <div id="chart-container-inner" style="display: block"></div>
+    <div id="chart-container-only-vulnerable-inner" style="display: none"></div>
+    </div>
+    <div id="chart-container-placeholder" style="display: block">
+        Chart will appear here...
+    </div>
+    <br>
+    <h3 class="light-text">Components table</h3>
+    <div id="table-container" style="display: none;">
+    This table visualizes components, their dependencies, vulnerabilities and licenses.<br>
+    The colors of the elements in columns "Component", "Depends on" and "Dependency of" indicate the vulnerability status of the components:
+    <ul>
+        <li><b>Dark red:</b> affected by at least one critical severity vulnerability.</li>
+        <li><b>Red:</b> affected by at least one high severity vulnerability.</li>
+        <li><b>Orange:</b> affected by at least one medium severity vulnerability.</li>  
+        <li><b>Yellow:</b> affected by at least one low severity vulnerability.</li>  
+        <li><b>Green:</b> affected by at least one informational severity vulnerability.</li>  
+        <li><b>Light blue:</b> not directly affected by vulnerabilities but has at least one vulnerable dependency.</li>  
+        <li><b>Grey:</b> neither the component nor its dependencies are affected by any vulnerabilities.</li>
+    </ul>
+    <br>
+    The colors of the elements in columns "Direct vulnerabilities" and "Transitive vulnerabilities" indicate the severity of the vulnerabilities:
+    <ul>
+        <li><b>Dark red:</b> critical.</li>
+        <li><b>Red:</b> high.</li>
+        <li><b>Orange:</b> medium.</li>  
+        <li><b>Yellow:</b>low.</li>  
+        <li><b>Green:</b>informational.</li> 
+    </ul>
+    <hr><br>
+        <div id="table-container-inner">
+            <table id="components-table" class="table table-striped table-bordered" style="width:100%"></table>
+        </div>
+    </div>
+    <div id="table-container-placeholder" style="display: block">
+        Components table will appear here...
+    </div>
+
+    <br>
+    <h3 class="light-text">Vulnerabilities table</h3>
+    <div id="vulnerabilities-table-container" style="display: none">
+        This table focuses on vulnerabilities and shows the components that are affected either directly or transitively.<br>
+        The colors of the elements in column "Vulnerability" indicate the severity of the vulnerabilities:
+        <ul>
+            <li><b>Dark red:</b> critical.</li>
+            <li><b>Red:</b> high.</li>
+            <li><b>Orange:</b> medium.</li>  
+            <li><b>Yellow:</b>low.</li>  
+            <li><b>Green:</b>informational.</li> 
+        </ul>
+        <br>
+        The colors of the elements in columns "Directly vulnerable components" and "Transitively vulnerable components" indicate the vulnerability status of the components:
+        <ul>
+            <li><b>Dark red:</b> affected by at least one critical severity vulnerability.</li>
+            <li><b>Red:</b> affected by at least one high severity vulnerability.</li>
+            <li><b>Orange:</b> affected by at least one medium severity vulnerability.</li>  
+            <li><b>Yellow:</b> affected by at least one low severity vulnerability.</li>  
+            <li><b>Green:</b> affected by at least one informational severity vulnerability.</li>  
+            <li><b>Light blue:</b> not directly affected by vulnerabilities but has at least one vulnerable dependency.</li> 
+        </ul>
+        <hr>
+        <br>
+        <table id="vulnerabilities-table" class="table table-striped table-bordered" style="width:100%"></table>
+    </div>
+    <div id="vulnerabilities-table-container-placeholder" style="display: block">
+       Vulnerabilities table will appear here...
+    </div>
+
+    <br>
+    <h3 class="light-text">Log</h3>
+    <div id="output">Log will appear here...</div>
+    <br><br>
+    <div id="footer">Sunshine - SBOM visualization tool | Made by <a href="https://www.linkedin.com/in/lucacapacci/">Luca Capacci</a> | Contributor <a href="https://www.linkedin.com/in/mattiafierro/">Mattia Fierro</a> | <a href="https://github.com/CycloneDX/Sunshine/">GitHub repository</a> | <a href="https://github.com/CycloneDX/Sunshine/blob/main/LICENSE">License</a></div>
+    
+    <script>
+
+        function fetchDataSync(url) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url, false);
+            xhr.send(null);
+            return xhr;
+        }
+
+        function generateRandomString() {
+            var characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            var charactersLength = characters.length;
+
+            for (let i = 0; i < 20; i++) {
+                result += characters.charAt(Math.floor(Math.random() * charactersLength));
+            }
+
+            return result;
+        }
+
+        
+        let pyodideInstance = null;
+        var pythonScriptUrl = "./sunshine.py?" + generateRandomString();
+        var pythonScript = null;
+
+        window.onload = function(e) {
+            const fragment = window.location.hash.substring(1);
+            if (!fragment) {
+                return
+            }
+            const base64Decoded = atob(fragment);
+            const compressedData = Uint8Array.from(base64Decoded, char => char.charCodeAt(0));
+
+            LZMA.decompress(compressedData, function on_decompress_complete(result) {
+                    loadAndRunScript(result, true);
+                }, function on_decompress_progress_update(percent) {});
+        }
+
+
+        function writeToLog(text) {           
+            var date = new Date();
+            var formattedDate = date.toISOString().replace('T', ' ').split('.')[0];
+
+            if (document.getElementById("output").textContent == "Log will appear here..." || text == "~~~~~~~~~~~~~~~ New file selected ~~~~~~~~~~~~~~~") {
+                document.getElementById("output").textContent = "[" + formattedDate + "] " + text;
+            }
+            else {
+                var newSpan = document.createElement("span");
+                newSpan.textContent = "\n" + "[" + formattedDate + "] " + text;
+                var outputDiv = document.getElementById("output");
+                outputDiv.appendChild(newSpan);
+            }
+        }
+
+        var myChart;
+
+        function renderChart(data, chartId) {
+            var dom = document.getElementById(chartId);
+            myChart = echarts.init(dom, null, {
+              renderer: 'canvas',
+              useDirtyRect: false
+            });
+            var app = {};
+
+            var option;
+
+            option = {
+              tooltip: {
+                    formatter: function(params) {
+                        return `${params.name}`;
+                    },
+                },
+              series: {
+                radius: ['15%', '100%'],
+                type: 'sunburst',
+                sort: undefined,
+                emphasis: {
+                  focus: 'ancestor'
+                },
+                data: data,
+                label: {
+                  rotate: 'radial',
+                  show: false
+                },
+                levels: []
+              }
+            };
+
+            if (option && typeof option === 'object') {
+              myChart.setOption(option);
+            }
+
+            window.addEventListener('resize', myChart.resize);
+        }
+
+        async function loadPyodideAndRun() {
+            if (!pyodideInstance) {
+                writeToLog("Loading environment...");
+                pyodideInstance = await loadPyodide();
+                writeToLog("Environment loaded!");
+            }
+        }
+
+        function showDiv(divId) {
+            var div = document.getElementById(divId);
+            div.style.display = "block";
+        }
+
+        function hideDiv(divId) {
+            var div = document.getElementById(divId);
+            div.style.display = "none";
+        }
+
+        function handleShowComponentsSwitchChange(radio) {
+            if (radio.value == "allComponents") {
+                hideDiv("chart-container-only-vulnerable-inner");
+                showDiv("chart-container-inner");
+                var shownChart = echarts.getInstanceByDom(document.getElementById("chart-container-inner"));
+                shownChart.resize();
+            }
+            else if (radio.value == "vulnerableComponents") {
+                hideDiv("chart-container-inner");
+                showDiv("chart-container-only-vulnerable-inner");
+                var shownChart = echarts.getInstanceByDom(document.getElementById("chart-container-only-vulnerable-inner"));
+                shownChart.resize();
+            }
+        }
+
+        function resetShowComponentsSwitch() {
+            hideDiv("sunburst-warning-too-big");
+            hideDiv("sunburst-danger-too-big");
+            showDiv("sunburst-selector-all");
+            showDiv("sunburst-selector-vulnerable");
+
+            var allComponents = document.getElementById('allComponents');
+            var vulnerableComponents = document.getElementById('vulnerableComponents');
+            allComponents.checked = true;
+            vulnerableComponents.checked = false;
+            handleShowComponentsSwitchChange(allComponents);
+        }
+
+        var file = null;
+
+        var doEnrichment = true;
+        var onlyInCisaKev = false;
+        var onlyCriticalSeverity = false;
+        var onlyHighSeverityOrAbove = false;
+        var onlyMediumSeverityOrAbove = false;
+        var onlyLowSeverityOrAbove = false;
+        var minCvss = 0.0;
+        var minEpss = 0.00;
+
+        var doEnrichmentNew = true;
+        var onlyInCisaKevNew = false;
+        var onlyCriticalSeverityNew = false;
+        var onlyHighSeverityOrAboveNew = false;
+        var onlyMediumSeverityOrAboveNew = false;
+        var onlyLowSeverityOrAboveNew = false;
+        var minCvssNew = 0.0;
+        var minEpssNew = 0.00;
+        
+        document.getElementById('file-input').addEventListener('change', handleFile);
+        function handleFile(event) {
+            file = event.target.files[0];
+            parseFile();
+        }
+
+        function checkSettingsHaveChanged() {
+            if (doEnrichment) {
+                if (doEnrichment != doEnrichmentNew || onlyInCisaKev != onlyInCisaKevNew || onlyCriticalSeverity != onlyCriticalSeverityNew || onlyHighSeverityOrAbove != onlyHighSeverityOrAboveNew || onlyMediumSeverityOrAbove != onlyMediumSeverityOrAboveNew || onlyLowSeverityOrAbove != onlyLowSeverityOrAboveNew || onlyLowSeverityOrAbove != onlyLowSeverityOrAboveNew || minCvss != minCvssNew || minEpss != minEpssNew) {
+                    document.getElementById("apply-settings").removeAttribute("disabled");
+                }
+                else {
+                    document.getElementById("apply-settings").setAttribute("disabled", "");
+                }
+            }
+            else {
+                if (doEnrichment != doEnrichmentNew || onlyCriticalSeverity != onlyCriticalSeverityNew || onlyHighSeverityOrAbove != onlyHighSeverityOrAboveNew || onlyMediumSeverityOrAbove != onlyMediumSeverityOrAboveNew || onlyLowSeverityOrAbove != onlyLowSeverityOrAboveNew || onlyLowSeverityOrAbove != onlyLowSeverityOrAboveNew || minCvss != minCvssNew) {
+                    document.getElementById("apply-settings").removeAttribute("disabled");
+                }
+                else {
+                    document.getElementById("apply-settings").setAttribute("disabled", "");
+                }
+
+            }
+        }
+
+        const enrichCheck = document.getElementById('enrich-check');
+        enrichCheck.addEventListener('change', function() {
+            if (this.checked) {
+                doEnrichmentNew = true;
+            } else {
+                doEnrichmentNew = false;
+            }
+            if (doEnrichmentNew) {
+                document.getElementById("cisa-kev-check").removeAttribute("disabled");
+                document.getElementById("epssRangeInput").removeAttribute("disabled");
+                document.getElementById("min-epss-label").style.color = "black";
+                document.getElementById("epssRangeValue").style.color = "black";
+                document.getElementById("epss-fixed-text").style.color = "black";
+            }
+            else {
+                document.getElementById("cisa-kev-check").setAttribute("disabled", "");
+                document.getElementById("epssRangeInput").setAttribute("disabled", "");
+                document.getElementById("min-epss-label").style.color = "grey";
+                document.getElementById("epssRangeValue").style.color = "grey";
+                document.getElementById("epss-fixed-text").style.color = "grey";
+
+            }
+            checkSettingsHaveChanged();
+        });
+
+        const cisaKevCheck = document.getElementById('cisa-kev-check');
+        cisaKevCheck.addEventListener('change', function() {
+            if (this.checked) {
+                onlyInCisaKevNew = true;
+            } else {
+                onlyInCisaKevNew = false;
+            }
+            checkSettingsHaveChanged();
+        });
+
+        function handleSeveritySwitchChange(radio) {
+            onlyCriticalSeverityNew = false;
+            onlyHighSeverityOrAboveNew = false;
+            onlyMediumSeverityOrAboveNew = false;
+            onlyLowSeverityOrAboveNew = false;
+            if (radio.value == "severity-critical") {
+                onlyCriticalSeverityNew = true;
+            }
+            else if (radio.value == "severity-high") {
+                onlyHighSeverityOrAboveNew = true;
+            }
+            else if (radio.value == "severity-medium") {
+                onlyMediumSeverityOrAboveNew = true;
+            }
+            else if (radio.value == "severity-low") {
+                onlyLowSeverityOrAboveNew = true;
+            }
+            checkSettingsHaveChanged();
+        }
+
+        function handleCvssChange(cvssValue) {
+            minCvssNew = cvssValue;
+            checkSettingsHaveChanged();
+        }
+
+        function handleEpssChange(epssValue) {
+            minEpssNew = epssValue;
+            checkSettingsHaveChanged();
+        }
+
+        const applySettings = document.getElementById("apply-settings");
+        applySettings.addEventListener("click", function() {
+            doEnrichment = doEnrichmentNew;
+            onlyInCisaKev = onlyInCisaKevNew;
+            onlyCriticalSeverity = onlyCriticalSeverityNew;
+            onlyHighSeverityOrAbove = onlyHighSeverityOrAboveNew;
+            onlyMediumSeverityOrAbove = onlyMediumSeverityOrAboveNew;
+            onlyLowSeverityOrAbove = onlyLowSeverityOrAboveNew;
+            onlyLowSeverityOrAbove = onlyLowSeverityOrAboveNew;
+            minCvss = minCvssNew;
+            minEpss = minEpssNew;
+            parseFile();
+            document.getElementById("apply-settings").setAttribute("disabled", "");
+        });
+
+        function parseFile() {
+            if (!file) return;
+            hideDiv("chart-container");
+            showDiv("chart-container-placeholder");
+            hideDiv("table-container");
+            showDiv("table-container-placeholder");
+            hideDiv("vulnerabilities-table-container");
+            showDiv("vulnerabilities-table-container-placeholder");
+            hideDiv("info-table-container");
+            showDiv("info-table-container-placeholder");
+            writeToLog("~~~~~~~~~~~~~~~ New file selected ~~~~~~~~~~~~~~~");
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    var data = e.target.result;
+                    loadAndRunScript(data, false);
+                } catch (error) {
+                    writeToLog("Error processing file: " + error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        var componentsTable = null;
+        var vulnerabilitiesTable = null;
+        var infoTable = null;
+
+        function renderTable(tableContent, tableId, showContainerId, placeholderContainerId, searchInTableClass) {
+            var table = null;
+            if (tableId == "components-table") {
+                table = componentsTable;
+            }
+            else if (tableId == "vulnerabilities-table") {
+                table = vulnerabilitiesTable;
+            }
+            else {
+                table = infoTable;
+            }
+            if (table) {
+                table.destroy();
+                table = null;
+            }
+            document.getElementById(tableId).innerHTML = tableContent;
+            if (!table) {
+                table = $('#' + tableId).DataTable({
+                    "order": [[ 0, "asc" ]],
+                    pageLength: 10,
+                    dom: 'Blfrtip',
+                    lengthMenu: [
+                        [10, 25, 50, -1],
+                        [10, 25, 50, 'All']
+                    ],
+                    buttons: [
+                      { extend: 'copy', className: 'btn btn-dark mb-3 btn-sm' },
+                      { extend: 'csv', className: 'btn btn-secondary mb-3 btn-sm' },
+                      { extend: 'excel', className: 'btn btn-success mb-3 btn-sm' },
+                      { extend: 'print', className: 'btn btn-danger mb-3 btn-sm', 
+                        customize: function (win) {
+                            $(win.document.body).css('font-size', '10pt');
+                            $(win.document.body).find('table').addClass('compact').css('font-size', 'inherit');
+
+                            // Add landscape mode
+                            var css = '@page { size: landscape; }',
+                                head = win.document.head || win.document.getElementsByTagName('head')[0],
+                                style = win.document.createElement('style');
+
+                            style.type = 'text/css';
+                            style.media = 'print';
+
+                            if (style.styleSheet) {
+                                style.styleSheet.cssText = css;
+                            } else {
+                                style.appendChild(win.document.createTextNode(css));
+                            }
+                            head.appendChild(style);
+                        }
+                      }
+                    ],
+                    orderCellsTop: true,
+                    autoWidth: true,
+                    scrollX: true
+                    
+                  });
+
+                $('#' + tableId + ' thead input').on('keyup change', function () {
+                    let columnIndex = $(this).parent().index();
+                    table.column(columnIndex).search(this.value).draw();
+                });
+
+                if (searchInTableClass != null) {
+                    $('.' + searchInTableClass).on('keyup change', function () {
+                        let columnIndex = $(this).parent().index();
+                        table.column(columnIndex).search(this.value).draw();
+                    });
+                }
+            }
+
+            if (tableId == "components-table") {
+                componentsTable = table;
+            }
+            else if (tableId == "vulnerabilities-table") {
+                vulnerabilitiesTable = table;
+            }
+            else {
+                infoTable = table;
+            }
+
+            showDiv(showContainerId);
+            hideDiv(placeholderContainerId);
+
+            table.columns.adjust();
+
+        }
+
+        function prepare_data(str)
+        {
+            var arr;
+            if (str[0] === "[" && str.slice(-1) === "]") {
+                try {
+                    arr = JSON.parse(str);
+                } catch (e) {}
+            }
+            if (arr) {
+                return arr;
+            }
+            return str;
+        }
+
+        function sleep(ms) {
+          return new Promise(resolve => setTimeout(resolve, ms))
+        }
+
+        function splitArrayIntoNParts(arr, n) {
+            if (n == 1) {
+                return [arr];
+            }
+            const chunkSize = Math.ceil(arr.length / n);
+            const result = [];
+
+            for (let i = 0; i < arr.length; i += chunkSize) {
+                result.push(arr.slice(i, i + chunkSize));
+            }
+
+            return result;
+        }
+
+        async function compressAndEncode(data) {
+            data = prepare_data(data);
+            var compression_mode = 1;
+            var finishedCompression = false;
+            LZMA.compress(data, compression_mode, function on_compress_complete(result) {
+                try {
+                    var originalByteArr = new Uint8Array(result);
+                    var fromCharCoded = "";
+                    var hasError = true;
+                    var currentSplit = 4;
+                    while (hasError) {
+                        try {
+                            for (let byteArr of splitArrayIntoNParts(originalByteArr, currentSplit)) {
+                                fromCharCodedPiece = String.fromCharCode(...byteArr);
+                                fromCharCoded += fromCharCodedPiece;
+
+                            }
+                            hasError = false;
+                        }
+                        catch (err1) {
+                            currentSplit += 1;
+                        }
+                    }
+                    const base64Encoded = btoa(fromCharCoded);
+                    window.location.hash = base64Encoded;
+                    writeToLog("Permalink built!");
+                    finishedCompression = true;
+                } catch (err) {
+                    writeToLog("Error creating permalink: " + err);
+                    finishedCompression = true;
+                }
+            }, function on_compress_progress_update(percent) {});
+
+            while (!finishedCompression) {
+                await sleep(500);
+            }
+        }
+
+        function countSegments(node) {
+          let count = 1;
+          if (node.children) {
+            node.children.forEach(child => {
+              count += countSegments(child);
+            });
+          }
+          return count;
+        }
+
+
+        function turnChartIntoImageIfTooManySegments() {
+            var chartContainerInnerDiv = document.getElementById("chart-container-inner");
+            var echartsInstance = echarts.getInstanceByDom(chartContainerInnerDiv);
+            var echartsInstanceData = echartsInstance.getOption().series[0].data;
+            let totalSegments = echartsInstanceData.reduce((sum, node) => sum + countSegments(node), 0);
+
+            if (totalSegments > 10000) {
+                var chartContainerInnerDivOnlyVuln = document.getElementById("chart-container-only-vulnerable-inner");
+                echarts.getInstanceByDom(chartContainerInnerDivOnlyVuln).dispose();
+                hideDiv("chart-container-only-vulnerable-inner");
+
+                showDiv("sunburst-warning-too-big");
+
+                hideDiv("sunburst-selector-all");
+                hideDiv("sunburst-selector-vulnerable");
+
+                chartContainerInnerDiv.style.display = "block";
+                chartContainerInnerDiv.style.height = '90vh';
+                echartsInstance.resize();
+
+                var imgData = echartsInstance.getDataURL({
+                  type: 'png',
+                  pixelRatio: 2, // Adjust as needed for resolution
+                  backgroundColor: '#fff' // Optional: set background color
+                });
+                echartsInstance.dispose();
+                
+                var img = document.createElement('img');
+                img.src = imgData;
+                img.style.width = '100%';
+                img.style.height = 'auto';
+
+                chartContainerInnerDiv.innerHTML = '';
+                chartContainerInnerDiv.appendChild(img);
+                chartContainerInnerDiv.style.height = 'auto';
+            }
+        }
+
+        function showWarningIfChartWasNotCreated() {
+            var chartContainerInnerDivOnlyVuln = document.getElementById("chart-container-only-vulnerable-inner");
+            hideDiv("chart-container-only-vulnerable-inner");
+            hideDiv("chart-container-inner")
+
+            showDiv("sunburst-danger-too-big");
+
+            hideDiv("sunburst-selector-all");
+            hideDiv("sunburst-selector-vulnerable");
+        }
+
+
+        async function loadAndRunScript(data, fromPermalink) {
+            await loadPyodideAndRun();
+
+            if (!pythonScript) {
+                try {
+                    writeToLog("Fetching instructions to be executed...");
+                    var response = await fetch(pythonScriptUrl);
+                    if (!response.ok) {
+                        writeToLog(`Failed to fetch instructions to be executed: ${response.statusText}`);
+                    }
+                    pythonScript = await response.text();
+                    writeToLog("Instructions fetched!");
+                } catch (error) {
+                    writeToLog(`Error: ${error.message}`);
+                }
+            }
+            if (pythonScript) {
+                writeToLog("Executing...");
+                pyodideInstance.globals.set("__name__", "__web__");
+                pyodideInstance.globals.set("INPUT_DATA", data);
+                pyodideInstance.globals.set("DO_ENRICHMENT", doEnrichment);
+                pyodideInstance.globals.set("ONLY_IN_CISA_KEV", onlyInCisaKev);
+                pyodideInstance.globals.set("ONLY_CRITICAL_SEVERITY", onlyCriticalSeverity);
+                pyodideInstance.globals.set("ONLY_HIGH_SEVERITY_OR_ABOVE", onlyHighSeverityOrAbove);
+                pyodideInstance.globals.set("ONLY_MEDIUM_SEVERITY_OR_ABOVE", onlyMediumSeverityOrAbove);
+                pyodideInstance.globals.set("ONLY_LOW_SEVERITY_OR_ABOVE", onlyLowSeverityOrAbove);
+                pyodideInstance.globals.set("MIN_CVSS", minCvss);
+                pyodideInstance.globals.set("MIN_EPSS", minEpss);
+
+                var result = await pyodideInstance.runPythonAsync(pythonScript);
+                writeToLog("Execution complete!");
+
+                document.getElementById("chart-container-inner").style.height = '90vh';
+            
+                let echartData = pyodideInstance.globals.get('OUTPUT_CHART_DATA');
+                writeToLog("Building chart...");
+                hideDiv("chart-container-placeholder");
+                showDiv("chart-container");
+                renderChart(JSON.parse(echartData), 'chart-container-inner');
+                writeToLog("Chart built!");
+                let echartDataVulnerableComponents = pyodideInstance.globals.get('OUTPUT_CHART_DATA_VULNERABLE_COMPONENTS');
+                writeToLog("Building chart with only vulnerable components...");
+                renderChart(JSON.parse(echartDataVulnerableComponents), 'chart-container-only-vulnerable-inner');
+                writeToLog("Chart built!");
+                resetShowComponentsSwitch();
+                let componentsTableContent = pyodideInstance.globals.get('OUTPUT_COMPONENTS_TABLE_DATA');
+                writeToLog("Building components table...");
+                renderTable(componentsTableContent, "components-table", "table-container", "table-container-placeholder", "search-in-table-comp");
+                writeToLog("Components table built!");
+                let vulnerabilitiesTableContent = pyodideInstance.globals.get('OUTPUT_VULNERABILITIES_TABLE_DATA');
+                writeToLog("Building vulnerabilities table...");
+                renderTable(vulnerabilitiesTableContent, "vulnerabilities-table", "vulnerabilities-table-container", "vulnerabilities-table-container-placeholder", "search-in-table-vuln");
+                writeToLog("Vulnerabilities table built!");
+                let metadataTableContent = pyodideInstance.globals.get('OUTPUT_METADATA_TABLE_DATA');
+                writeToLog("Building summary table...");
+                renderTable(metadataTableContent, "info-table", "info-table-container", "info-table-container-placeholder", null);
+                writeToLog("Summary table built!");
+
+                let chartWasCreated = pyodideInstance.globals.get('CHART_WAS_CREATED');
+
+                if (!chartWasCreated) {
+                    showWarningIfChartWasNotCreated();
+                }
+
+                /*if (fromPermalink == false) {
+                    writeToLog("Building permalink...");
+                    await compressAndEncode(data);
+                }*/
+                turnChartIntoImageIfTooManySegments();
+
+                writeToLog("Finished.");
+            }
+        }
+    </script>
+</body>
+</html>
