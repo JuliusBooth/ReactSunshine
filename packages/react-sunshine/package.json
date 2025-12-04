@@ -1,0 +1,27 @@
+{
+  "name": "react-sunshine",
+  "version": "0.1.0",
+  "description": "React wrapper for the Sunshine CycloneDX visualizations",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/"
+  },
+  "keywords": ["react", "cyclonedx", "sbom"],
+  "author": "",
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "dependencies": {
+    "sunshine-core": "^0.1.0"
+  }
+}

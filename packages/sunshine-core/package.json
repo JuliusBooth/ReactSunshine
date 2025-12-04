@@ -1,0 +1,23 @@
+{
+  "name": "sunshine-core",
+  "version": "0.1.0",
+  "description": "Imperative CycloneDX visualizations for Sunshine",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/"
+  },
+  "keywords": ["cyclonedx", "sbom", "visualization"],
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "chart.js": "^4.4.4"
+  }
+}
